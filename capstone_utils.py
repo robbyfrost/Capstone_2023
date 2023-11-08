@@ -1,6 +1,6 @@
 # ------------------------------------------------
 # Name: capstone_utils.py
-# Author: Robert M. Frost
+# Author: Robert M. Frost, Savannah J. Southward, and Colin K. Welty
 # University of Oklahoma
 # Created: 01 November 2023
 # Purpose: Functions to assist with TC supercell 
@@ -20,30 +20,61 @@ import warnings
 from pyart.core.transforms import antenna_vectors_to_cartesian
 from PIL import Image
 # ------------------------------------------------
-# def timeheight(drad, dtrack, meso_id):
-#     """Read in radar data from TC supercell case, horizontally average a 
-#     variable in a column, and combine into timeheight series.
+def timeheight(drad, dtrack, meso_id, radius=1):
+    """Read in radar data from TC supercell case, horizontally average a 
+    variable in a column, and combine into timeheight series.
+    :param str drad: Directory in which nexrad files are stored
+    :param str dtrack: Filepath to capstone_2023.nc file
+    :param str meso_id: name of case to plot
+    :param float radius: radius to include in average (degrees lat/lon)
+    """
+    # read in tracking dataset
+    tracks = xr.open_dataset(dtrack)
+    case_meso = tracks.where(tracks.mesocyclone_id == meso_id, drop=True)
+    case_meso["mesocyclone_longitude"] = case_meso.mesocyclone_longitude - 360
+    # number of track points
+    nt = case_meso.mesocyclone_track_points.size
+    # Create array to store radar grid
+    g_all = np.empty((nt, 241, 241))
+    # Create arrays to store grid lat/lon
+    glat_all, glon_all = np.empty((nt, 241, 241)), np.empty((nt, 241, 241))
+    # Create arrays to store meso location
+    mlat_all, mlon_all = np.empty(nt), np.empty(nt)
+    # list of radar file names
+    rfiles = os.listdir(drad)
+    nfile = len(rfiles)
 
-#     :param str drad: Directory in which nexrad files are stored
-#     :param str dtrack: Filepath to capstone_2023.nc file
-#     :param str meso_id: name of case to plot
-#     """
-    
-#     # Create lists to store wspd, u, and v DataArrays
-#     refl_all = []
-#     # Create a list to store the timestamps
-#     times = []
-    
-#     # Loop over files in the directory
-#     for i in range(os.listdir(drad)):
-#         # read in radar file
-#         radar = pyart.io.read(f"{drad}{filename}")
-#         # read in tracking dataset
-#         tracks = xr.open_dataset(dtrack)
-#         case_meso = xr.where(tracks.mesocyclone_id == meso_id, drop=True)
+    # Loop over files in the directory
+    for i in range(nt):
+        # read in radar file
+        radar = pyart.io.read(f"{drad}{rfiles[i]}")
+        # mask out last 10 gates of each ray, this removes the "ring" around the radar.
+        radar.fields["reflectivity"]["data"][:, -10:] = np.ma.masked
+        # exclude masked gates from the gridding
+        gatefilter = pyart.filters.GateFilter(radar)
+        gatefilter.exclude_transition()
+        gatefilter.exclude_masked("reflectivity")
+        # grid data to cartesian format
+        grid = pyart.map.grid_from_radars(
+            (radar,),
+            gatefilters=(gatefilter,),
+            grid_shape=(1, 241, 241),
+            grid_limits=((2000, 2000), (-123000.0, 123000.0), (-123000.0, 123000.0)),
+            fields=["reflectivity", "velocity"],
+        )
 
-#         # meso lat/lon
-#         lat = case_meso.mesocyclone_latitude[]
+        # put grid into data array
+        grid_array = grid.fields['reflectivity']['data'][0]
+        # extract grid lat/lon, put in array
+        glat, glon = grid.point_latitude['data'][0], grid.point_longitude['data'][0]
+        print(glat[0,0], glat[1,0])
+        # now xarray 
+        grid_xr = xr.DataArray(grid_array, dims=('lat', 'lon'),
+                               coords={'lat': glat, 'lon': glon})
+        return grid_xr
+        # # arrays of meso locations
+        # mlat_all[i], mlon_all[i] = case_meso.mesocyclone_latitude[i], case_meso.mesocyclone_longitude[i]
+
 
 # -------------------------
 def geographic_to_cartesian_aeqd(lon, lat, lon_0, lat_0, R=6370997.0):
@@ -163,6 +194,7 @@ def make_gif(dfig, dout):
 
     print(f"GIF saved successfully at {dout}")
 
+# -------------------------
 def column_vertical_profile(
     radar, latitude, longitude, azimuth_spread=3, spatial_spread=3):
     """
@@ -313,6 +345,8 @@ def column_vertical_profile(
 
     # Convert to xarray
     return assemble_column(radar, total_moment, forazi, dis, latitude, longitude)
+
+# -------------------------
 def sphere_distance(radar_latitude, target_latitude, radar_longitude, target_longitude):
     """
     Calculated of the great circle distance between radar and target
@@ -365,8 +399,7 @@ def sphere_distance(radar_latitude, target_latitude, radar_longitude, target_lon
     # return the output
     return distance
 
-
-
+# -------------------------
 def for_azimuth(radar_latitude, target_latitude, radar_longitude, target_longitude):
     """
     Calculation of inital bearing alongitudeg a great-circle arc
@@ -426,8 +459,7 @@ def for_azimuth(radar_latitude, target_latitude, radar_longitude, target_longitu
 
     return azimuth
 
-
-
+# -------------------------
 def get_field_location(radar, latitude, longitude):
     """
     Given the location (in latitude, longitude) of a target, extract the
@@ -578,8 +610,7 @@ def get_field_location(radar, latitude, longitude):
     column.attrs["longitude_of_location"] = str(longitude) + " degrees"
     return column
 
-
-
+# -------------------------
 def get_column_rays(radar, azimuth):
     """
     Given the location (in latitude,longitude) of a target, return the rays
@@ -631,8 +662,7 @@ def get_column_rays(radar, azimuth):
 
     return rays
 
-
-
+# -------------------------
 def get_sweep_rays(sweep_azi, azimuth, azimuth_spread=0):
     """
     Extract the specific rays for a given azimuth from a radar sweep
@@ -669,7 +699,7 @@ def get_sweep_rays(sweep_azi, azimuth, azimuth_spread=0):
 
     return centerline, spread
 
-
+# -------------------------
 def subset_fields(radar, ray, target_gates):
     """
     Parameter
@@ -701,7 +731,7 @@ def subset_fields(radar, ray, target_gates):
 
     return moment
 
-
+# -------------------------
 def assemble_column(radar, total_moment, azimuth, distance, latitude, longitude):
     """
     With a dictionary containing the extracted fields from a radar sweep,
@@ -824,7 +854,7 @@ def assemble_column(radar, total_moment, azimuth, distance, latitude, longitude)
 
     return column
 
-
+# -------------------------
 def check_latitude(latitude):
     """
     Function to check if input latitude is valid for type and value.
@@ -850,7 +880,7 @@ def check_latitude(latitude):
             "Latitude type not valid, need to convert input to be an int or float"
         )
 
-
+# -------------------------
 def check_longitude(longitude):
     """
     Function to check if input latitude is valid for type and value.
