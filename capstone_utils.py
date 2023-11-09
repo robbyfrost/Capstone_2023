@@ -20,69 +20,119 @@ import warnings
 from pyart.core.transforms import antenna_vectors_to_cartesian
 from PIL import Image
 # ------------------------------------------------
-def timeheight(drad, dtrack, meso_id, radius=0.5):
-    """Read in radar data from TC supercell case, horizontally average a 
-    variable in a column, and combine into timeheight series.
-    :param str drad: Directory in which nexrad files are stored
+def cartesian_column(radar_file, dtrack, meso_id, radius=0.5):
+    """Extract column of radar data around a mesocyclone for one timestep.
+    :param str radar_file: File path to radar file
     :param str dtrack: Filepath to capstone_2023.nc file
     :param str meso_id: name of case to plot
-    :param float radius: radius to include in average (degrees lat/lon)
+    :param float radius: radius to include in column (degrees lat/lon)
     """
     # read in tracking dataset
     tracks = xr.open_dataset(dtrack)
     case_meso = tracks.where(tracks.mesocyclone_id == meso_id, drop=True)
     case_meso["mesocyclone_longitude"] = case_meso.mesocyclone_longitude - 360
-    # number of track points
-    nt = case_meso.mesocyclone_track_points.size
-    # Create array to store radar grid
-    g_all = np.empty((nt, 241, 241))
-    # Create arrays to store grid lat/lon
-    glat_all, glon_all = np.empty((nt, 241, 241)), np.empty((nt, 241, 241))
-    # Create arrays to store meso location
-    mlat_all, mlon_all = np.empty(nt), np.empty(nt)
+
+    # read in radar file
+    radar = pyart.io.read(radar_file)
+    # extract time
+    radar_time = radar.time
+    # mask out last 10 gates of each ray, this removes the "ring" around the radar.
+    radar.fields["reflectivity"]["data"][:, -10:] = np.ma.masked
+    # exclude masked gates from the gridding
+    gatefilter = pyart.filters.GateFilter(radar)
+    gatefilter.exclude_transition()
+    gatefilter.exclude_masked("reflectivity")
+    # grid data to cartesian format
+    grid = pyart.map.grid_from_radars(
+        (radar,),
+        gatefilters=(gatefilter,),
+        grid_shape=(50, 241, 241),
+        grid_limits=((0, 10000), (-123000.0, 123000.0), (-123000.0, 123000.0)),
+        fields=['velocity', 'differential_reflectivity', 'cross_correlation_ratio', 'differential_phase', 'spectrum_width', 'reflectivity'],
+    )
+
+    # arrays of radar products
+    velocity = grid.fields['velocity']['data']
+    differential_reflectivity = grid.fields['differential_reflectivity']['data']
+    cross_correlation_ratio = grid.fields['cross_correlation_ratio']['data']
+    differential_phase = grid.fields['differential_phase']['data']
+    spectrum_width = grid.fields['spectrum_width']['data']
+    reflectivity = grid.fields['reflectivity']['data']
+    # extract grid dimensions
+    glat, glon, gz = grid.point_latitude['data'][0], grid.point_longitude['data'][0], grid.z['data']
+    # xarray dataset
+    ds = xr.Dataset(
+        data_vars=dict(
+            velocity=(['z', 'lat', 'lon'], velocity),
+            differential_reflectivity=(['z', 'lat', 'lon'], differential_reflectivity),
+            cross_correlation_ratio=(['z', 'lat', 'lon'], cross_correlation_ratio),
+            differential_phase=(['z', 'lat', 'lon'], differential_phase),
+            spectrum_width=(['z', 'lat', 'lon'], spectrum_width),
+            reflectivity=(['z', 'lat', 'lon'], reflectivity),
+            ),
+        coords={
+            'grid_lat': (['lat', 'lon'], glat), 
+            'grid_lon': (['lat', 'lon'], glon),
+            'z': (['z'], gz)}
+    )
+    print(ds.dims)
+    
+    # mesocyclone location
+    mlat, mlon = case_meso.mesocyclone_latitude, case_meso.mesocyclone_longitude
+    # extract mesocyclone
+    meso_grid = ds.where(((ds.grid_lat - mlat)**2 + (ds.grid_lon - mlon)**2) < radius**2, drop=True)
+    # meso_grid = ds.where(((ds.lat - mlat)**2 + (ds.lon - mlon)**2) < radius**2, drop=True)
+
+    # these should not be returned, just being used for testing
+    return meso_grid, radar_time
+    
+# -------------------------
+def timeheight(drad, dtrack, meso_id):
     # list of radar file names
     rfiles = os.listdir(drad)
-    nfile = len(rfiles)
+    nfiles = len(rfiles)
+    # arrays for vertical profiles
+    velocity = np.empty((nfiles,50))
+    differential_reflectivity = np.empty((nfiles,50))
+    cross_correlation_ratio = np.empty((nfiles,50))
+    differential_phase = np.empty((nfiles,50))
+    spectrum_width = np.empty((nfiles,50))
+    reflectivity = np.empty((nfiles,50))
+    # time array
+    time = np.zeros(nfiles)
+    
+    # loop over radar files
+    for i in range(1): #just for testing pls fix
+        # filepath to radar file
+        radar_file = f"{drad}{rfiles[i]}"
+        # masked radar data
+        ds, radar_time = cartesian_column(radar_file, dtrack, meso_id)
+        # horizontally average data
+        velocity[i] = ds.velocity.mean(dim=("lat","lon"))
+        differential_reflectivity[i] = ds.differential_reflectivity.mean(dim=("lat","lon"))
+        cross_correlation_ratio[i] = ds.cross_correlation_ratio.mean(dim=("lat","lon"))
+        differential_phase[i] = ds.differential_phase.mean(dim=("lat","lon"))
+        spectrum_width[i] = ds.spectrum_width.mean(dim=("lat","lon"))
+        reflectivity[i] = ds.reflectivity.mean(dim=("lat","lon"))
+        # time array
+        time[i] = radar_time
 
-    # Loop over files in the directory
-    for i in range(nt):
-        # read in radar file
-        radar = pyart.io.read(f"{drad}{rfiles[i]}")
-        # mask out last 10 gates of each ray, this removes the "ring" around the radar.
-        radar.fields["reflectivity"]["data"][:, -10:] = np.ma.masked
-        # exclude masked gates from the gridding
-        gatefilter = pyart.filters.GateFilter(radar)
-        gatefilter.exclude_transition()
-        gatefilter.exclude_masked("reflectivity")
-        # grid data to cartesian format
-        grid = pyart.map.grid_from_radars(
-            (radar,),
-            gatefilters=(gatefilter,),
-            grid_shape=(1, 241, 241),
-            grid_limits=((2000, 2000), (-123000.0, 123000.0), (-123000.0, 123000.0)),
-            fields=["reflectivity", "velocity"],
+    # create dataset
+    th = xr.Dataset(
+        data_vars=dict(
+           velocity=(['time', 'z'], velocity),
+            differential_reflectivity=(['time', 'z'], differential_reflectivity),
+            cross_correlation_ratio=(['time', 'z'], cross_correlation_ratio),
+            differential_phase=(['time', 'z'], differential_phase),
+            spectrum_width=(['time', 'z'], spectrum_width),
+            reflectivity=(['time', 'z'], reflectivity),
+            ), 
+        coords={
+            'time': (['time'], time),
+            'z': (['z'], gz)}
         )
-
-        # put grid into data array
-        grid_array = grid.fields['reflectivity']['data'][0]
-        # extract grid lat/lon, put in array
-        glat, glon = grid.point_latitude['data'][0], grid.point_longitude['data'][0]
-        
-        # now xarray 
-        grid_da = xr.DataArray(grid_array, 
-                               dims=('lat', 'lon'), 
-                               coords={'grid_lat': (['lat', 'lon'], glat), 
-                                       'grid_lon': (['lat', 'lon'], glon)}
-                                       )
-        
-        # mesocyclone location
-        mlat, mlon = case_meso.mesocyclone_latitude[i], case_meso.mesocyclone_longitude[i]
-        # extract mesocyclone
-        meso_grid = grid_da.where(((grid_da.grid_lat - mlat)**2 + (grid_da.grid_lon - mlon)**2) < radius**2, drop=True)
-
-        # these should not be returned, just being used for testing
-        return meso_grid, mlat, mlon
-
+    
+    return th
 
 # -------------------------
 def geographic_to_cartesian_aeqd(lon, lat, lon_0, lat_0, R=6370997.0):
