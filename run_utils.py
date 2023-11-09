@@ -12,9 +12,9 @@ from capstone_utils import *
 run_cartesian_column = False
 run_timeheight = True
 
-drad = "/Users/robertfrost/Documents/boomsoon/2023_semester_2/capstone/analysis/Capstone_2023/data/lightning_case1/"
+drad = "/Users/robertfrost/Documents/boomsoon/2023_semester_2/capstone/analysis/Capstone_2023/data/nonlightning_case1/"
 dtrack = "/Users/robertfrost/Documents/boomsoon/2023_semester_2/capstone/analysis/capstone_2023.nc"
-meso_id = "201708-053"
+meso_id = "201708-056"
 dout = "/Users/robertfrost/Documents/boomsoon/2023_semester_2/capstone/analysis/Capstone_2023/data/"
 track_point = 0
 

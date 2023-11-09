@@ -83,6 +83,8 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     mlat, mlon = case_meso.mesocyclone_latitude[track_point].values, case_meso.mesocyclone_longitude[track_point].values
     # extract mesocyclone
     meso_grid = ds.where(((ds.grid_lat - mlat)**2 + (ds.grid_lon - mlon)**2) < radius**2, drop=True)
+    # close ds
+    ds.close()
 
     return meso_grid
     
@@ -111,23 +113,26 @@ def timeheight(drad, dtrack, meso_id, dout):
     time = []
     
     # loop over radar files
-    with ProgressBar():
-        for i in range(nfiles):
-            # filepath to radar file
-            radar_file = f"{drad}{rfiles[i]}"
-            # masked radar data
-            ds = cartesian_column(radar_file, dtrack, meso_id, track_point=i)
-            # horizontally average data
-            velocity[i] = ds.velocity.mean(dim=("lat","lon"))
-            differential_reflectivity[i] = ds.differential_reflectivity.mean(dim=("lat","lon"))
-            cross_correlation_ratio[i] = ds.cross_correlation_ratio.mean(dim=("lat","lon"))
-            differential_phase[i] = ds.differential_phase.mean(dim=("lat","lon"))
-            spectrum_width[i] = ds.spectrum_width.mean(dim=("lat","lon"))
-            reflectivity[i] = ds.reflectivity.mean(dim=("lat","lon"))
-            # time list
-            time.append(rfiles[i][4:19])
-            # z dimension
-            gz = ds.z.values
+    for i in range(nfiles):
+        # filepath to radar file
+        radar_file = f"{drad}{rfiles[i]}"
+        # masked radar data
+        ds = cartesian_column(radar_file, dtrack, meso_id, track_point=i)
+        # horizontally average data
+        velocity[i] = ds.velocity.mean(dim=("lat","lon"))
+        differential_reflectivity[i] = ds.differential_reflectivity.mean(dim=("lat","lon"))
+        cross_correlation_ratio[i] = ds.cross_correlation_ratio.mean(dim=("lat","lon"))
+        differential_phase[i] = ds.differential_phase.mean(dim=("lat","lon"))
+        spectrum_width[i] = ds.spectrum_width.mean(dim=("lat","lon"))
+        reflectivity[i] = ds.reflectivity.mean(dim=("lat","lon"))
+        # z dimension
+        gz = ds.z.values
+        # close dataset
+        ds.close()
+        # time list
+        time.append(rfiles[i][4:19])
+
+        print(f"Finished time {i}!")
 
     # Convert string to datetime objects
     time = [datetime.strptime(t, "%Y%m%d_%H%M%S") for t in time]
