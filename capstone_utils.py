@@ -6,9 +6,12 @@
 # Purpose: Functions to assist with TC supercell 
 # capstone.  
 # 
-# timeheight: Read in radar data from TC supercell 
-# case,horizontally average a variable in a column, 
-# and combine into timeheight series
+# cartesian_column: Extract column of radar data 
+# around a mesocyclone for one timestep.
+# 
+# timeheight: Loop over time in mesocyclone to create time-height
+# series of radar variables. Utilizes cartesian_column to
+# gird data and focus around mesocyclone.
 # ------------------------------------------------
 import pyart
 import numpy as np
@@ -20,11 +23,12 @@ import warnings
 from pyart.core.transforms import antenna_vectors_to_cartesian
 from PIL import Image
 # ------------------------------------------------
-def cartesian_column(radar_file, dtrack, meso_id, radius=0.5):
+def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     """Extract column of radar data around a mesocyclone for one timestep.
     :param str radar_file: File path to radar file
     :param str dtrack: Filepath to capstone_2023.nc file
     :param str meso_id: name of case to plot
+    :param int track_point: which time in mesocyclone to mask
     :param float radius: radius to include in column (degrees lat/lon)
     """
     # read in tracking dataset
@@ -34,8 +38,6 @@ def cartesian_column(radar_file, dtrack, meso_id, radius=0.5):
 
     # read in radar file
     radar = pyart.io.read(radar_file)
-    # extract time
-    radar_time = radar.time
     # mask out last 10 gates of each ray, this removes the "ring" around the radar.
     radar.fields["reflectivity"]["data"][:, -10:] = np.ma.masked
     # exclude masked gates from the gridding
@@ -75,21 +77,28 @@ def cartesian_column(radar_file, dtrack, meso_id, radius=0.5):
             'grid_lon': (['lat', 'lon'], glon),
             'z': (['z'], gz)}
     )
-    print(ds.dims)
     
     # mesocyclone location
-    mlat, mlon = case_meso.mesocyclone_latitude, case_meso.mesocyclone_longitude
+    mlat, mlon = case_meso.mesocyclone_latitude[track_point].values, case_meso.mesocyclone_longitude[track_point].values
     # extract mesocyclone
     meso_grid = ds.where(((ds.grid_lat - mlat)**2 + (ds.grid_lon - mlon)**2) < radius**2, drop=True)
-    # meso_grid = ds.where(((ds.lat - mlat)**2 + (ds.lon - mlon)**2) < radius**2, drop=True)
 
     # these should not be returned, just being used for testing
-    return meso_grid, radar_time
+    return meso_grid
     
 # -------------------------
-def timeheight(drad, dtrack, meso_id):
+def timeheight(drad, dtrack, meso_id, dout):
+    """Loop over time in mesocyclone to create time-height
+    series of radar variables. Utilizes cartesian_column to
+    gird data and focus around mesocyclone.
+    :param str radar_file: File path to radar file
+    :param str dtrack: Filepath to capstone_2023.nc file
+    :param str meso_id: name of case to plot
+    :param str dout: Directory for time-height series to be output
+    """
     # list of radar file names
     rfiles = os.listdir(drad)
+    rfiles = sorted(rfiles)
     nfiles = len(rfiles)
     # arrays for vertical profiles
     velocity = np.empty((nfiles,50))
@@ -99,14 +108,14 @@ def timeheight(drad, dtrack, meso_id):
     spectrum_width = np.empty((nfiles,50))
     reflectivity = np.empty((nfiles,50))
     # time array
-    time = np.zeros(nfiles)
+    time = []
     
     # loop over radar files
-    for i in range(1): #just for testing pls fix
+    for i in range(nfiles):
         # filepath to radar file
         radar_file = f"{drad}{rfiles[i]}"
         # masked radar data
-        ds, radar_time = cartesian_column(radar_file, dtrack, meso_id)
+        ds = cartesian_column(radar_file, dtrack, meso_id, track_point=i)
         # horizontally average data
         velocity[i] = ds.velocity.mean(dim=("lat","lon"))
         differential_reflectivity[i] = ds.differential_reflectivity.mean(dim=("lat","lon"))
@@ -114,8 +123,13 @@ def timeheight(drad, dtrack, meso_id):
         differential_phase[i] = ds.differential_phase.mean(dim=("lat","lon"))
         spectrum_width[i] = ds.spectrum_width.mean(dim=("lat","lon"))
         reflectivity[i] = ds.reflectivity.mean(dim=("lat","lon"))
-        # time array
-        time[i] = radar_time
+        # time list
+        time.append(rfiles[i][4:19])
+        # z dimension
+        gz = ds.z.values
+
+    # Convert string to datetime objects
+    time = [datetime.strptime(t, "%Y%m%d_%H%M%S") for t in time]
 
     # create dataset
     th = xr.Dataset(
@@ -129,8 +143,11 @@ def timeheight(drad, dtrack, meso_id):
             ), 
         coords={
             'time': (['time'], time),
-            'z': (['z'], gz)}
+            'z': (['z'], gz)},
+        attrs=dict(mesocyclone_id=meso_id)
         )
+    
+    th.to_netcdf(f"{dout}timeheight_{meso_id}.nc")
     
     return th
 
