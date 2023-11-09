@@ -20,7 +20,7 @@ import warnings
 from pyart.core.transforms import antenna_vectors_to_cartesian
 from PIL import Image
 # ------------------------------------------------
-def timeheight(drad, dtrack, meso_id, radius=1):
+def timeheight(drad, dtrack, meso_id, radius=0.5):
     """Read in radar data from TC supercell case, horizontally average a 
     variable in a column, and combine into timeheight series.
     :param str drad: Directory in which nexrad files are stored
@@ -67,13 +67,21 @@ def timeheight(drad, dtrack, meso_id, radius=1):
         grid_array = grid.fields['reflectivity']['data'][0]
         # extract grid lat/lon, put in array
         glat, glon = grid.point_latitude['data'][0], grid.point_longitude['data'][0]
-        print(glat[0,0], glat[1,0])
+        
         # now xarray 
-        grid_xr = xr.DataArray(grid_array, dims=('lat', 'lon'),
-                               coords={'lat': glat, 'lon': glon})
-        return grid_xr
-        # # arrays of meso locations
-        # mlat_all[i], mlon_all[i] = case_meso.mesocyclone_latitude[i], case_meso.mesocyclone_longitude[i]
+        grid_da = xr.DataArray(grid_array, 
+                               dims=('lat', 'lon'), 
+                               coords={'grid_lat': (['lat', 'lon'], glat), 
+                                       'grid_lon': (['lat', 'lon'], glon)}
+                                       )
+        
+        # mesocyclone location
+        mlat, mlon = case_meso.mesocyclone_latitude[i], case_meso.mesocyclone_longitude[i]
+        # extract mesocyclone
+        meso_grid = grid_da.where(((grid_da.grid_lat - mlat)**2 + (grid_da.grid_lon - mlon)**2) < radius**2, drop=True)
+
+        # these should not be returned, just being used for testing
+        return meso_grid, mlat, mlon
 
 
 # -------------------------
