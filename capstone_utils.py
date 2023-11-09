@@ -22,6 +22,7 @@ import pandas as pd
 import warnings
 from pyart.core.transforms import antenna_vectors_to_cartesian
 from PIL import Image
+from dask.diagnostics import ProgressBar
 # ------------------------------------------------
 def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     """Extract column of radar data around a mesocyclone for one timestep.
@@ -83,7 +84,6 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     # extract mesocyclone
     meso_grid = ds.where(((ds.grid_lat - mlat)**2 + (ds.grid_lon - mlon)**2) < radius**2, drop=True)
 
-    # these should not be returned, just being used for testing
     return meso_grid
     
 # -------------------------
@@ -111,22 +111,23 @@ def timeheight(drad, dtrack, meso_id, dout):
     time = []
     
     # loop over radar files
-    for i in range(nfiles):
-        # filepath to radar file
-        radar_file = f"{drad}{rfiles[i]}"
-        # masked radar data
-        ds = cartesian_column(radar_file, dtrack, meso_id, track_point=i)
-        # horizontally average data
-        velocity[i] = ds.velocity.mean(dim=("lat","lon"))
-        differential_reflectivity[i] = ds.differential_reflectivity.mean(dim=("lat","lon"))
-        cross_correlation_ratio[i] = ds.cross_correlation_ratio.mean(dim=("lat","lon"))
-        differential_phase[i] = ds.differential_phase.mean(dim=("lat","lon"))
-        spectrum_width[i] = ds.spectrum_width.mean(dim=("lat","lon"))
-        reflectivity[i] = ds.reflectivity.mean(dim=("lat","lon"))
-        # time list
-        time.append(rfiles[i][4:19])
-        # z dimension
-        gz = ds.z.values
+    with ProgressBar():
+        for i in range(nfiles):
+            # filepath to radar file
+            radar_file = f"{drad}{rfiles[i]}"
+            # masked radar data
+            ds = cartesian_column(radar_file, dtrack, meso_id, track_point=i)
+            # horizontally average data
+            velocity[i] = ds.velocity.mean(dim=("lat","lon"))
+            differential_reflectivity[i] = ds.differential_reflectivity.mean(dim=("lat","lon"))
+            cross_correlation_ratio[i] = ds.cross_correlation_ratio.mean(dim=("lat","lon"))
+            differential_phase[i] = ds.differential_phase.mean(dim=("lat","lon"))
+            spectrum_width[i] = ds.spectrum_width.mean(dim=("lat","lon"))
+            reflectivity[i] = ds.reflectivity.mean(dim=("lat","lon"))
+            # time list
+            time.append(rfiles[i][4:19])
+            # z dimension
+            gz = ds.z.values
 
     # Convert string to datetime objects
     time = [datetime.strptime(t, "%Y%m%d_%H%M%S") for t in time]
@@ -147,9 +148,42 @@ def timeheight(drad, dtrack, meso_id, dout):
         attrs=dict(mesocyclone_id=meso_id)
         )
     
-    th.to_netcdf(f"{dout}timeheight_{meso_id}.nc")
+    fsave = f"{dout}timeheight_{meso_id}.nc"
+    th.to_netcdf(fsave)
+    print(f"Dataset saved to {fsave}!")
+
+# -------------------------
+def make_gif(dfig, dout):
+    """Append figures into a gif and output
+
+    :param str dfig: Directory in which figures lie
+    :param str dout: File path and name for gif
+    """
+    # create list to store figure paths
+    image_all = []
     
-    return th
+    # list of file names in dfig
+    files = os.listdir(dfig)
+    # sorted alphabetically
+    sorted_files = sorted(files)
+    
+    # loop over files
+    for i in range(len(files)):
+        image_path = f"{dfig}{sorted_files[i]}"
+        image_all.append(image_path)
+
+    # Create a list to store the image objects
+    images = []
+
+    # Open and append each image to the list
+    for file in image_all:
+        image = Image.open(file)
+        images.append(image)
+
+    # Save the images as an animated GIF
+    images[0].save(dout, save_all=True, append_images=images[1:], optimize=False, duration=1000, loop=0)
+
+    print(f"GIF saved successfully at {dout}")
 
 # -------------------------
 def geographic_to_cartesian_aeqd(lon, lat, lon_0, lat_0, R=6370997.0):
@@ -235,39 +269,6 @@ def geographic_to_cartesian_aeqd(lon, lat, lon_0, lat_0, R=6370997.0):
     )
 
     return x, y
-
-# -------------------------
-def make_gif(dfig, dout):
-    """Append figures into a gif and output
-
-    :param str dfig: Directory in which figures lie
-    :param str dout: File path and name for gif
-    """
-    # create list to store figure paths
-    image_all = []
-    
-    # list of file names in dfig
-    files = os.listdir(dfig)
-    # sorted alphabetically
-    sorted_files = sorted(files)
-    
-    # loop over files
-    for i in range(len(files)):
-        image_path = f"{dfig}{sorted_files[i]}"
-        image_all.append(image_path)
-
-    # Create a list to store the image objects
-    images = []
-
-    # Open and append each image to the list
-    for file in image_all:
-        image = Image.open(file)
-        images.append(image)
-
-    # Save the images as an animated GIF
-    images[0].save(dout, save_all=True, append_images=images[1:], optimize=False, duration=1000, loop=0)
-
-    print(f"GIF saved successfully at {dout}")
 
 # -------------------------
 def column_vertical_profile(
