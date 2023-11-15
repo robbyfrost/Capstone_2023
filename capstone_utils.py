@@ -41,6 +41,10 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     radar = pyart.io.read(radar_file)
     # mask out last 10 gates of each ray, this removes the "ring" around the radar.
     radar.fields["reflectivity"]["data"][:, -10:] = np.ma.masked
+    # extract Kdp
+    kdp = pyart.retrieve.kdp_maesaka(radar)
+    # add kdp to the radar object
+    radar.add_field('kdp', kdp[0], replace_existing=True)
     # exclude masked gates from the gridding
     gatefilter = pyart.filters.GateFilter(radar)
     gatefilter.exclude_transition()
@@ -49,9 +53,9 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     grid = pyart.map.grid_from_radars(
         (radar,),
         gatefilters=(gatefilter,),
-        grid_shape=(50, 241, 241),
-        grid_limits=((0, 10000), (-123000.0, 123000.0), (-123000.0, 123000.0)),
-        fields=['velocity', 'differential_reflectivity', 'cross_correlation_ratio', 'differential_phase', 'spectrum_width', 'reflectivity'],
+        grid_shape=(75, 241, 241),
+        grid_limits=((0, 15000), (-123000.0, 123000.0), (-123000.0, 123000.0)),
+        fields=['velocity', 'differential_reflectivity', 'cross_correlation_ratio', 'differential_phase', 'spectrum_width', 'reflectivity', 'kdp'],
     )
 
     # arrays of radar products
@@ -61,6 +65,7 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     differential_phase = grid.fields['differential_phase']['data']
     spectrum_width = grid.fields['spectrum_width']['data']
     reflectivity = grid.fields['reflectivity']['data']
+    kdp = grid.fields['kdp']['data']
     # extract grid dimensions
     glat, glon, gz = grid.point_latitude['data'][0], grid.point_longitude['data'][0], grid.z['data']
     # xarray dataset
@@ -72,6 +77,7 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
             differential_phase=(['z', 'lat', 'lon'], differential_phase),
             spectrum_width=(['z', 'lat', 'lon'], spectrum_width),
             reflectivity=(['z', 'lat', 'lon'], reflectivity),
+            specific_differential_phase=(['z', 'lat', 'lon'], kdp)
             ),
         coords={
             'grid_lat': (['lat', 'lon'], glat), 
@@ -83,8 +89,6 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     mlat, mlon = case_meso.mesocyclone_latitude[track_point].values, case_meso.mesocyclone_longitude[track_point].values
     # extract mesocyclone
     meso_grid = ds.where(((ds.grid_lat - mlat)**2 + (ds.grid_lon - mlon)**2) < radius**2, drop=True)
-    # close ds
-    ds.close()
 
     return meso_grid
     
@@ -103,12 +107,13 @@ def timeheight(drad, dtrack, meso_id, dout):
     rfiles = sorted(rfiles)
     nfiles = len(rfiles)
     # arrays for vertical profiles
-    velocity = np.empty((nfiles,50))
-    differential_reflectivity = np.empty((nfiles,50))
-    cross_correlation_ratio = np.empty((nfiles,50))
-    differential_phase = np.empty((nfiles,50))
-    spectrum_width = np.empty((nfiles,50))
-    reflectivity = np.empty((nfiles,50))
+    velocity = np.empty((nfiles,75))
+    differential_reflectivity = np.empty((nfiles,75))
+    cross_correlation_ratio = np.empty((nfiles,75))
+    differential_phase = np.empty((nfiles,75))
+    spectrum_width = np.empty((nfiles,75))
+    reflectivity = np.empty((nfiles,75))
+    kdp = np.empty((nfiles,75))
     # time array
     time = []
     
@@ -125,6 +130,7 @@ def timeheight(drad, dtrack, meso_id, dout):
         differential_phase[i] = ds.differential_phase.mean(dim=("lat","lon"))
         spectrum_width[i] = ds.spectrum_width.mean(dim=("lat","lon"))
         reflectivity[i] = ds.reflectivity.mean(dim=("lat","lon"))
+        kdp[i] = ds.specific_differential_phase.mean(dim=("lat","lon"))
         # z dimension
         gz = ds.z.values
         # close dataset
@@ -146,6 +152,7 @@ def timeheight(drad, dtrack, meso_id, dout):
             differential_phase=(['time', 'z'], differential_phase),
             spectrum_width=(['time', 'z'], spectrum_width),
             reflectivity=(['time', 'z'], reflectivity),
+            specific_differential_phase=(['time', 'z'], kdp)
             ), 
         coords={
             'time': (['time'], time),

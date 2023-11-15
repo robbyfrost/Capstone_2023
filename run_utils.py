@@ -22,7 +22,7 @@ track_point = 0
 
 # extract column for single time
 if run_cartesian_column:
-    run_cartesian_column(drad, dtrack, meso_id, track_point)
+    cartesian_column(drad, dtrack, meso_id, track_point)
 
 # create time-height series
 if run_timeheight:
