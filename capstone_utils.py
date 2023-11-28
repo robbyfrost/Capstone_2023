@@ -58,7 +58,7 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
         fields=['velocity', 'differential_reflectivity', 'cross_correlation_ratio', 'differential_phase', 'spectrum_width', 'reflectivity', 'kdp'],
     )
     # close radar object
-    radar.close()
+    radar = 0
     # arrays of radar products
     velocity = grid.fields['velocity']['data']
     differential_reflectivity = grid.fields['differential_reflectivity']['data']
@@ -70,7 +70,7 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     # extract grid dimensions
     glat, glon, gz = grid.point_latitude['data'][0], grid.point_longitude['data'][0], grid.z['data']
     # close grid
-    grid.close()
+    grid = 0
 
     # xarray dataset
     ds = xr.Dataset(
