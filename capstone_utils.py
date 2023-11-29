@@ -94,7 +94,7 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     # extract mesocyclone
     meso_grid = ds.where(((ds.grid_lat - mlat)**2 + (ds.grid_lon - mlon)**2) < radius**2, drop=True)
 
-    return ds, meso_grid
+    return meso_grid
     
 # -------------------------
 def timeheight(drad, dtrack, meso_id, dout):
