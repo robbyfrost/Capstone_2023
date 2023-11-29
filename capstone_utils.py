@@ -53,8 +53,8 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     grid = pyart.map.grid_from_radars(
         (radar,),
         gatefilters=(gatefilter,),
-        grid_shape=(75, 241, 241),
-        grid_limits=((0, 15000), (-123000.0, 123000.0), (-123000.0, 123000.0)),
+        grid_shape=(75, 300, 300),
+        grid_limits=((0, 15000), (-150000.0, 150000.0), (-150000.0, 150000.0)),
         fields=['velocity', 'differential_reflectivity', 'cross_correlation_ratio', 'differential_phase', 'spectrum_width', 'reflectivity', 'kdp'],
     )
     # close radar object
@@ -94,7 +94,7 @@ def cartesian_column(radar_file, dtrack, meso_id, track_point, radius=0.025):
     # extract mesocyclone
     meso_grid = ds.where(((ds.grid_lat - mlat)**2 + (ds.grid_lon - mlon)**2) < radius**2, drop=True)
 
-    return meso_grid
+    return ds, meso_grid
     
 # -------------------------
 def timeheight(drad, dtrack, meso_id, dout):
